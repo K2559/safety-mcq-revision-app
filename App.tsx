@@ -26,7 +26,15 @@ const App: React.FC = () => {
   useEffect(() => {
     const loadQuestions = async () => {
       try {
-        const response = await fetch('/Question/Safety Quiz Question 2022.txt');
+        // Use import.meta.env.BASE_URL to get the correct base path for GitHub Pages
+        const basePath = import.meta.env.BASE_URL || '/';
+        const questionPath = `${basePath}Question/Safety%20Quiz%20Question%202022.txt`;
+        const response = await fetch(questionPath);
+        
+        if (!response.ok) {
+          throw new Error(`Failed to load questions: ${response.status}`);
+        }
+        
         const text = await response.text();
         const { parseQuestions } = await import('./utils');
         const parsedQuestions = parseQuestions(text);

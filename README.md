@@ -18,3 +18,11 @@ View your app in AI Studio: https://ai.studio/apps/drive/1bnQSPZRHFUfUgNOjEh73pb
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+## Project Structure
+
+The question file is located in `public/Question/Safety Quiz Question 2022.txt`. Files in the `public` folder are automatically copied to the build output and served as static assets.
+
+## Deploy to GitHub Pages
+
+The app is configured to deploy to GitHub Pages automatically via GitHub Actions when you push to the main branch. The deployment workflow is defined in `.github/workflows/deploy.yml`.
