@@ -28,16 +28,16 @@ const App: React.FC = () => {
       try {
         // Use import.meta.env.BASE_URL to get the correct base path for GitHub Pages
         const basePath = import.meta.env.BASE_URL || '/';
-        const questionPath = `${basePath}Question/Safety%20Quiz%20Question%202022.txt`;
+        const questionPath = `${basePath}Question/extracted_questions.json`;
         const response = await fetch(questionPath);
         
         if (!response.ok) {
           throw new Error(`Failed to load questions: ${response.status}`);
         }
         
-        const text = await response.text();
-        const { parseQuestions } = await import('./utils');
-        const parsedQuestions = parseQuestions(text);
+        const jsonData = await response.json();
+        const { parseQuestionsFromJSON } = await import('./utils');
+        const parsedQuestions = parseQuestionsFromJSON(jsonData);
         
         if (parsedQuestions.length > 0) {
           setQuestions(parsedQuestions);

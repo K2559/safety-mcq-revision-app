@@ -1,5 +1,5 @@
 {
   "name": "Safety MCQ Revision App",
-  "description": "An interactive revision tool for construction and industrial safety questions. Supports text file import for large question banks.",
+  "description": "An interactive revision tool for construction and industrial safety questions. Uses extracted questions from safety training materials in JSON format.",
   "requestFramePermissions": []
 }

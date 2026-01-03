@@ -1,5 +1,19 @@
 import { Question, Option } from './types';
 
+// Parse questions from JSON format (extracted_questions.json)
+export const parseQuestionsFromJSON = (jsonData: any[]): Question[] => {
+  return jsonData.map(item => ({
+    id: item.index,
+    questionText: item.question,
+    options: [
+      { id: 'a', text: item.options.a },
+      { id: 'b', text: item.options.b },
+      { id: 'c', text: item.options.c }
+    ],
+    correctAnswer: item.answer.toLowerCase()
+  }));
+};
+
 export const parseQuestions = (text: string): Question[] => {
   const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
   const questions: Question[] = [];
