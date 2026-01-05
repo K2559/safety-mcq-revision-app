@@ -93,6 +93,27 @@ export const shuffleArray = <T,>(array: T[]): T[] => {
   return newArray;
 };
 
+// Extract section number from question index (e.g., "1.2" -> "1", "12.5" -> "12")
+export const getSectionFromIndex = (index: string): string => {
+  const parts = index.split('.');
+  return parts[0];
+};
+
+// Get all unique sections from questions
+export const getUniqueSections = (questions: Question[]): string[] => {
+  const sections = new Set<string>();
+  questions.forEach(q => {
+    sections.add(getSectionFromIndex(q.id));
+  });
+  return Array.from(sections).sort((a, b) => parseInt(a) - parseInt(b));
+};
+
+// Filter questions by sections
+export const filterQuestionsBySections = (questions: Question[], sections: string[]): Question[] => {
+  if (sections.length === 0) return questions;
+  return questions.filter(q => sections.includes(getSectionFromIndex(q.id)));
+};
+
 // A small sample of the provided data for default state
 export const DEFAULT_DATA = `
 1.1 工友搬運重物時，應依從下列哪一項做法才正確？ 

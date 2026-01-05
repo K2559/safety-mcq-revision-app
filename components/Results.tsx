@@ -3,11 +3,13 @@ import { QuizResult } from '../types';
 
 interface ResultsProps {
   result: QuizResult;
+  mistakeCount: number;
   onRetry: () => void;
+  onRedoMistakes: () => void;
   onHome: () => void;
 }
 
-const Results: React.FC<ResultsProps> = ({ result, onRetry, onHome }) => {
+const Results: React.FC<ResultsProps> = ({ result, mistakeCount, onRetry, onRedoMistakes, onHome }) => {
   const percentage = Math.round((result.correct / result.total) * 100) || 0;
   
   return (
@@ -64,11 +66,19 @@ const Results: React.FC<ResultsProps> = ({ result, onRetry, onHome }) => {
           >
             Retry Quiz
           </button>
+          {mistakeCount > 0 && (
+            <button
+              onClick={onRedoMistakes}
+              className="px-8 py-3 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-xl transition-colors shadow-lg shadow-orange-200"
+            >
+              Redo Mistakes ({mistakeCount})
+            </button>
+          )}
           <button
             onClick={onHome}
             className="px-8 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl transition-colors"
           >
-            Upload New File
+            Restart
           </button>
         </div>
       </div>

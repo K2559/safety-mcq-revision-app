@@ -1,13 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { AppState, Question, QuizResult } from './types';
 import Uploader from './components/Uploader';
 import QuizCard from './components/QuizCard';
 import Results from './components/Results';
 import QuestionMap from './components/QuestionMap';
+import { getUniqueSections, filterQuestionsBySections, getSectionFromIndex } from './utils';
 
 const App: React.FC = () => {
   const [state, setState] = useState<AppState>(AppState.QUIZ);
-  const [questions, setQuestions] = useState<Question[]>([]);
+  const [allQuestions, setAllQuestions] = useState<Question[]>([]); // All loaded questions
+  const [activeQuestions, setActiveQuestions] = useState<Question[]>([]); // Filtered questions for current quiz
   
   // Navigation State
   const [history, setHistory] = useState<number[]>([]);
@@ -15,12 +17,23 @@ const App: React.FC = () => {
   const [isRandomMode, setIsRandomMode] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Section selection
+  const [selectedSections, setSelectedSections] = useState<string[]>([]);
+  const [showSectionModal, setShowSectionModal] = useState(false);
+
+  // Mistakes tracking (persisted across sessions)
+  const [mistakeIds, setMistakeIds] = useState<Set<string>>(new Set());
+  const [isMistakesOnlyMode, setIsMistakesOnlyMode] = useState(false);
+
   const [userAnswers, setUserAnswers] = useState<{ [key: string]: string }>({});
   const [isAnswerRevealed, setIsAnswerRevealed] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const currentQuestionIndex = history[historyIndex] ?? 0;
+
+  // Get available sections from all questions
+  const availableSections = useMemo(() => getUniqueSections(allQuestions), [allQuestions]);
 
   // Load questions from fixed file path on mount
   useEffect(() => {
@@ -40,12 +53,19 @@ const App: React.FC = () => {
         const parsedQuestions = parseQuestionsFromJSON(jsonData);
         
         if (parsedQuestions.length > 0) {
-          setQuestions(parsedQuestions);
+          setAllQuestions(parsedQuestions);
+          setActiveQuestions(parsedQuestions);
           setHistory([0]);
           setHistoryIndex(0);
           setUserAnswers({});
           setIsAnswerRevealed(false);
           setShowMap(false);
+          
+          // Load saved mistakes from localStorage
+          const savedMistakes = localStorage.getItem('quiz-mistakes');
+          if (savedMistakes) {
+            setMistakeIds(new Set(JSON.parse(savedMistakes)));
+          }
         }
       } catch (error) {
         console.error('Error loading questions:', error);
@@ -64,16 +84,24 @@ const App: React.FC = () => {
 
   // Auto-scroll the preview list when current question changes
   useEffect(() => {
-    if (scrollRef.current && questions.length > 0) {
+    if (scrollRef.current && activeQuestions.length > 0) {
       const button = scrollRef.current.children[currentQuestionIndex] as HTMLElement;
       if (button) {
         button.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
       }
     }
-  }, [currentQuestionIndex, questions.length]);
+  }, [currentQuestionIndex, activeQuestions.length]);
+
+  // Save mistakes to localStorage whenever they change
+  useEffect(() => {
+    if (mistakeIds.size > 0) {
+      localStorage.setItem('quiz-mistakes', JSON.stringify(Array.from(mistakeIds)));
+    }
+  }, [mistakeIds]);
 
   const handleQuestionsLoaded = (parsedQuestions: Question[], isRandom: boolean) => {
-    setQuestions(parsedQuestions);
+    setAllQuestions(parsedQuestions);
+    setActiveQuestions(parsedQuestions);
     setIsRandomMode(isRandom);
     
     // Determine start index
@@ -91,18 +119,80 @@ const App: React.FC = () => {
   };
 
   const updateRevealState = (questionIndex: number) => {
-    const questionId = questions[questionIndex].id;
+    const questionId = activeQuestions[questionIndex].id;
     setIsAnswerRevealed(!!userAnswers[questionId]);
   };
 
   const handleOptionSelect = (optionId: string) => {
-    const question = questions[currentQuestionIndex];
+    const question = activeQuestions[currentQuestionIndex];
     setUserAnswers(prev => ({ ...prev, [question.id]: optionId }));
     setIsAnswerRevealed(true);
+    
+    // Track mistakes
+    if (optionId !== question.correctAnswer) {
+      setMistakeIds(prev => new Set([...prev, question.id]));
+    } else {
+      // Remove from mistakes if answered correctly
+      setMistakeIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(question.id);
+        return newSet;
+      });
+    }
   };
 
   const toggleRandomMode = () => {
     setIsRandomMode(prev => !prev);
+  };
+
+  // Apply filters and start quiz with filtered questions
+  const applyFiltersAndStart = () => {
+    let filtered = allQuestions;
+    
+    // Filter by sections if any selected
+    if (selectedSections.length > 0) {
+      filtered = filterQuestionsBySections(filtered, selectedSections);
+    }
+    
+    // Filter by mistakes only if enabled
+    if (isMistakesOnlyMode) {
+      filtered = filtered.filter(q => mistakeIds.has(q.id));
+    }
+    
+    if (filtered.length === 0) {
+      alert(isMistakesOnlyMode ? 'No mistakes to review!' : 'No questions match the selected filters.');
+      return;
+    }
+    
+    setActiveQuestions(filtered);
+    
+    // Determine start index
+    let startIndex = 0;
+    if (isRandomMode && filtered.length > 0) {
+      startIndex = Math.floor(Math.random() * filtered.length);
+    }
+    
+    setHistory([startIndex]);
+    setHistoryIndex(0);
+    setUserAnswers({});
+    setIsAnswerRevealed(false);
+    setShowSectionModal(false);
+  };
+
+  const toggleSection = (section: string) => {
+    setSelectedSections(prev => 
+      prev.includes(section) 
+        ? prev.filter(s => s !== section)
+        : [...prev, section]
+    );
+  };
+
+  const selectAllSections = () => {
+    setSelectedSections(availableSections);
+  };
+
+  const clearAllSections = () => {
+    setSelectedSections([]);
   };
 
   const handleNext = () => {
@@ -121,7 +211,7 @@ const App: React.FC = () => {
 
     if (isRandomMode) {
       // Find unvisited questions
-      const unvisited = questions
+      const unvisited = activeQuestions
         .map((_, idx) => idx)
         .filter(idx => !visitedSet.has(idx));
       
@@ -133,7 +223,7 @@ const App: React.FC = () => {
       nextIndex = unvisited[randomIdx];
     } else {
       // Sequential
-      if (currentQuestionIndex >= questions.length - 1) {
+      if (currentQuestionIndex >= activeQuestions.length - 1) {
         finishQuiz();
         return;
       }
@@ -171,7 +261,7 @@ const App: React.FC = () => {
 
   const calculateResults = (): QuizResult => {
     let correct = 0;
-    const historyData = questions.map(q => {
+    const historyData = activeQuestions.map(q => {
       const userSelected = userAnswers[q.id];
       const isCorrect = userSelected === q.correctAnswer;
       if (isCorrect) correct++;
@@ -183,11 +273,33 @@ const App: React.FC = () => {
     });
 
     return {
-      total: questions.length,
+      total: activeQuestions.length,
       correct,
-      wrong: questions.length - correct,
+      wrong: activeQuestions.length - correct,
       history: historyData
     };
+  };
+
+  const startMistakesOnlyQuiz = () => {
+    const mistakeQuestions = allQuestions.filter(q => mistakeIds.has(q.id));
+    if (mistakeQuestions.length === 0) {
+      alert('No mistakes to review! Great job!');
+      return;
+    }
+    
+    setActiveQuestions(mistakeQuestions);
+    setIsMistakesOnlyMode(true);
+    
+    let startIndex = 0;
+    if (isRandomMode && mistakeQuestions.length > 0) {
+      startIndex = Math.floor(Math.random() * mistakeQuestions.length);
+    }
+    
+    setHistory([startIndex]);
+    setHistoryIndex(0);
+    setUserAnswers({});
+    setIsAnswerRevealed(false);
+    setState(AppState.QUIZ);
   };
 
   const renderContent = () => {
@@ -207,14 +319,14 @@ const App: React.FC = () => {
         return <Uploader onQuestionsLoaded={handleQuestionsLoaded} />;
 
       case AppState.QUIZ:
-        if (questions.length === 0) return null;
-        const currentQ = questions[currentQuestionIndex];
+        if (activeQuestions.length === 0) return null;
+        const currentQ = activeQuestions[currentQuestionIndex];
         
         // Determine if this is the last question (for button text)
         const visitedSet = new Set(history);
         const isLastQuestion = isRandomMode 
-          ? visitedSet.size === questions.length && historyIndex === history.length - 1
-          : currentQuestionIndex === questions.length - 1 && historyIndex === history.length - 1;
+          ? visitedSet.size === activeQuestions.length && historyIndex === history.length - 1
+          : currentQuestionIndex === activeQuestions.length - 1 && historyIndex === history.length - 1;
 
         return (
           <div className="max-w-4xl mx-auto px-4 py-6 flex flex-col min-h-screen relative">
@@ -232,7 +344,8 @@ const App: React.FC = () => {
                 
                 <div className="text-gray-600 font-semibold">
                    {/* In random mode, show progress based on unique visits */}
-                   {isRandomMode ? `${new Set(history).size} / ${questions.length}` : `${currentQuestionIndex + 1} / ${questions.length}`}
+                   {isRandomMode ? `${new Set(history).size} / ${activeQuestions.length}` : `${currentQuestionIndex + 1} / ${activeQuestions.length}`}
+                   {isMistakesOnlyMode && <span className="ml-2 text-orange-500 text-xs">(Mistakes)</span>}
                 </div>
 
                 <button
@@ -244,8 +357,8 @@ const App: React.FC = () => {
                 </button>
               </div>
 
-              {/* Random Mode Toggle */}
-              <div className="flex justify-center items-center mb-3">
+              {/* Mode Controls */}
+              <div className="flex justify-center items-center gap-2 mb-3 flex-wrap">
                 <button
                   onClick={toggleRandomMode}
                   className={`px-4 py-2 rounded-lg font-medium text-sm transition-all flex items-center gap-2 ${
@@ -257,13 +370,39 @@ const App: React.FC = () => {
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"></path>
                   </svg>
-                  {isRandomMode ? 'Random Mode ON' : 'Sequential Mode'}
+                  {isRandomMode ? 'Random' : 'Sequential'}
                 </button>
+
+                <button
+                  onClick={() => setShowSectionModal(true)}
+                  className="px-4 py-2 rounded-lg font-medium text-sm transition-all flex items-center gap-2 bg-white text-gray-700 border border-gray-300 hover:bg-gray-50"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path>
+                  </svg>
+                  Sections {selectedSections.length > 0 ? `(${selectedSections.length})` : ''}
+                </button>
+
+                {mistakeIds.size > 0 && (
+                  <button
+                    onClick={startMistakesOnlyQuiz}
+                    className={`px-4 py-2 rounded-lg font-medium text-sm transition-all flex items-center gap-2 ${
+                      isMistakesOnlyMode
+                        ? 'bg-orange-500 text-white hover:bg-orange-600'
+                        : 'bg-white text-orange-600 border border-orange-300 hover:bg-orange-50'
+                    }`}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                    </svg>
+                    Mistakes ({mistakeIds.size})
+                  </button>
+                )}
               </div>
 
               {/* Scrollable Preview List */}
               <div className="flex items-center space-x-2 overflow-x-auto pb-2 scrollbar-hide" ref={scrollRef}>
-                {questions.map((q, idx) => {
+                {activeQuestions.map((q, idx) => {
                   const answer = userAnswers[q.id];
                   let statusColor = "bg-white border-gray-300 text-gray-500";
                   if (idx === currentQuestionIndex) {
@@ -279,6 +418,7 @@ const App: React.FC = () => {
                       key={q.id}
                       onClick={() => handleJumpToQuestion(idx)}
                       className={`flex-shrink-0 w-8 h-8 rounded-full border text-xs font-bold flex items-center justify-center transition-all ${statusColor}`}
+                      title={`Question ${q.id}`}
                     >
                       {idx + 1}
                     </button>
@@ -325,12 +465,94 @@ const App: React.FC = () => {
             </div>
 
             <QuestionMap 
-              questions={questions}
+              questions={activeQuestions}
               userAnswers={userAnswers}
               onSelectQuestion={handleJumpToQuestion}
               onClose={() => setShowMap(false)}
               isOpen={showMap}
             />
+
+            {/* Section Selection Modal */}
+            {showSectionModal && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[80vh] overflow-hidden">
+                  <div className="p-6 border-b border-gray-200">
+                    <div className="flex justify-between items-center">
+                      <h3 className="text-xl font-bold text-gray-800">Select Sections</h3>
+                      <button
+                        onClick={() => setShowSectionModal(false)}
+                        className="text-gray-400 hover:text-gray-600"
+                      >
+                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                      </button>
+                    </div>
+                    <p className="text-sm text-gray-500 mt-1">Choose which sections to include in your quiz</p>
+                  </div>
+                  
+                  <div className="p-4 border-b border-gray-200 flex gap-2">
+                    <button
+                      onClick={selectAllSections}
+                      className="px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                    >
+                      Select All
+                    </button>
+                    <button
+                      onClick={clearAllSections}
+                      className="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                    >
+                      Clear All
+                    </button>
+                  </div>
+
+                  <div className="p-4 overflow-y-auto max-h-[40vh]">
+                    <div className="grid grid-cols-4 gap-2">
+                      {availableSections.map(section => {
+                        const sectionQuestionCount = allQuestions.filter(q => getSectionFromIndex(q.id) === section).length;
+                        const isSelected = selectedSections.includes(section);
+                        return (
+                          <button
+                            key={section}
+                            onClick={() => toggleSection(section)}
+                            className={`p-3 rounded-lg border-2 transition-all text-center ${
+                              isSelected
+                                ? 'bg-blue-50 border-blue-500 text-blue-700'
+                                : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'
+                            }`}
+                          >
+                            <div className="font-bold text-lg">{section}</div>
+                            <div className="text-xs opacity-70">{sectionQuestionCount} Q</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="p-4 border-t border-gray-200 bg-gray-50">
+                    <div className="flex items-center justify-between mb-4">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={isMistakesOnlyMode}
+                          onChange={(e) => setIsMistakesOnlyMode(e.target.checked)}
+                          className="w-4 h-4 text-orange-500 rounded focus:ring-orange-500"
+                        />
+                        <span className="text-sm font-medium text-gray-700">
+                          Mistakes only ({mistakeIds.size})
+                        </span>
+                      </label>
+                    </div>
+                    <button
+                      onClick={applyFiltersAndStart}
+                      className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-colors"
+                    >
+                      Start Quiz ({selectedSections.length === 0 ? 'All Sections' : `${selectedSections.length} Section${selectedSections.length > 1 ? 's' : ''}`})
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         );
 
@@ -338,11 +560,12 @@ const App: React.FC = () => {
         return (
           <Results 
             result={calculateResults()} 
+            mistakeCount={mistakeIds.size}
             onRetry={() => {
               // Reset for retry, keeping the same mode
               let startIndex = 0;
-              if (isRandomMode && questions.length > 0) {
-                startIndex = Math.floor(Math.random() * questions.length);
+              if (isRandomMode && activeQuestions.length > 0) {
+                startIndex = Math.floor(Math.random() * activeQuestions.length);
               }
               setHistory([startIndex]);
               setHistoryIndex(0);
@@ -350,6 +573,7 @@ const App: React.FC = () => {
               setIsAnswerRevealed(false);
               setState(AppState.QUIZ);
             }}
+            onRedoMistakes={startMistakesOnlyQuiz}
             onHome={() => window.location.reload()}
           />
         );

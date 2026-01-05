@@ -27,3 +27,9 @@ export interface QuizResult {
     isCorrect: boolean;
   }[];
 }
+
+export interface QuizSettings {
+  isRandomMode: boolean;
+  selectedSections: string[]; // e.g., ['1', '2', '3']
+  mistakesOnly: boolean;
+}
